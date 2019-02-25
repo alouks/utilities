@@ -2,20 +2,31 @@
 
 class Logger {
 
+    protected $pid;
     protected $level;
-    protected $file_name;
+    protected $log_file;
+    protected $hostname;
+    protected $log_path;
     protected $error_log;
     protected $debug_log;
-    protected $hostname;
-    protected $pid;
+    protected $debug_log_json;
+    protected $error_log_json;
 
-    function __construct($file_name = "", $debug_level = 0) {
+
+    function __construct($debug_level = 0) {
 
         //_Log File Definitions =========================
-        $this->debug_log = "/path/to/debug.log";
-        $this->debug_log_json = "/path/to/debug.json";
-        $this->error_log = "/path/to/error.log";
-        $this->error_log_json = "/path/to/error.json";
+        $this->log_path = "/var/log/";
+        //-----------------------------------------------
+        $this->debug_log = $this->log_path."debug.log";
+        $this->debug_log_json = $this->log_path."debug.json";
+        $this->error_log = $this->log_path."error.log";
+        $this->error_log_json = $this->log_path."error.json";
+
+        if(!is_file($this->debug_log)){file_put_contents($this->debug_log, "\n");}
+        if(!is_file($this->debug_log_json)){file_put_contents($this->debug_log_json, "\n");}
+        if(!is_file($this->error_log)){file_put_contents($this->error_log, "\n");}
+        if(!is_file($this->error_log_json)){file_put_contents($this->error_log_json, "\n");}
         //===============================================
 
         $this->pid = posix_getpid();
@@ -30,11 +41,7 @@ class Logger {
             $this->hostname = substr($this->hostname, 0, strpos($this->hostname, "."));
         }
 
-        if(is_int($file_name)) {
-            $this->level = $file_name;
-        } else {
-            $this->level = $debug_level;
-        }
+        $this->level = $debug_level;
 
     }
 
@@ -64,22 +71,18 @@ class Logger {
 
         if ($this->level >= $level) {
             $bt = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1);
-            $from_file = $this->file_name;
             $actual_file = substr($bt[0]["file"], strrpos($bt[0]["file"], "/") + 1);
-            if ($this->file_name !== $actual_file) {
-                $from_file .= "($actual_file)";
-            }
             $line_num = $bt[0]["line"];
             if (is_object($message) || is_array($message)) {
 
                 $message = print_r( $message, true );
-                file_put_contents($this->debug_log, date("M d H:i:s") . " $this->hostname $from_file".'['.$this->pid."]: [DEBUG] ($line_num) $message\n", FILE_APPEND | LOCK_EX);
+                file_put_contents($this->debug_log, date("M d H:i:s") . " $this->hostname ($actual_file)".'['.$this->pid."]: [DEBUG] ($line_num) $message\n", FILE_APPEND | LOCK_EX);
 
                 $this->log_json($this->debug_log_json, $actual_file, $line_num, 'DEBUG', $message);
 
             } else {
 
-                file_put_contents($this->debug_log, date("M d H:i:s") . " $this->hostname $from_file" . '[' . $this->pid . "]: [DEBUG] ($line_num) $message\n", FILE_APPEND | LOCK_EX);
+                file_put_contents($this->debug_log, date("M d H:i:s") . " $this->hostname ($actual_file)" . '[' . $this->pid . "]: [DEBUG] ($line_num) $message\n", FILE_APPEND | LOCK_EX);
 
                 $this->log_json($this->debug_log_json, $actual_file, $line_num, 'DEBUG', $message);
 
@@ -120,14 +123,10 @@ class Logger {
         $message = var_export($message, true);
 
         $bt = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1);
-        $from_file = $this->file_name;
         $actual_file = substr($bt[0]["file"], strrpos($bt[0]["file"], "/") + 1);
-        if($this->file_name !== $actual_file) {
-            $from_file .= "($actual_file)";
-        }
         $line_num = $bt[0]["line"];
 
-        $message_header = date("M d H:i:s") . " $this->hostname $from_file".'['.$this->pid."]:";
+        $message_header = date("M d H:i:s") . " $this->hostname ($actual_file)".'['.$this->pid."]:";
 
         switch($level) {
             case '1':
@@ -172,6 +171,58 @@ class Logger {
             file_put_contents($this->error_log, "$message_header [$temp_level] ($line_num) $message\n", FILE_APPEND | LOCK_EX);
 
             $this->log_json($this->error_log_json, $actual_file, $line_num, $temp_level, $message);
+
+        }
+
+    }
+
+    /**
+     * json()
+     *
+     * Prints a json message to a defined output file
+     *
+     * @param int $level log level for the message
+     * @param string $message The message to print
+     * @return void
+     * @throws Exception
+     */
+    public function json($level, $message, $severity, $log_file) {
+
+        $level_type = gettype($level);
+
+        if(!isset($log_file)) {
+            $this->log_file = $this->log_path."default.json";
+            if(!is_file($this->log_file)){
+                file_put_contents($this->log_file, "\n");     // Save our content to the file.
+            }
+        } else {
+            $this->log_file = $log_file;
+        }
+
+        try {
+            if($level_type !== "integer") {
+                throw new Exception(__CLASS__ ."->" . __FUNCTION__ . ": Invalid parameter type received for level! Expected integer but received $level_type.", 1);
+            }
+        } catch (Exception $e) {
+            echo $e->getMessage();
+        }
+
+        $message = var_export($message, true);
+
+        if ($this->level >= $level) {
+            $bt = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 1);
+            $actual_file = substr($bt[0]["file"], strrpos($bt[0]["file"], "/") + 1);
+            $line_num = $bt[0]["line"];
+            if (is_object($message) || is_array($message)) {
+
+                $message = print_r( $message, true );
+                $this->log_json($this->log_file, $actual_file, $line_num, $severity, $message);
+
+            } else {
+
+                $this->log_json($this->log_file, $actual_file, $line_num, $severity, $message);
+
+            }
 
         }
 
